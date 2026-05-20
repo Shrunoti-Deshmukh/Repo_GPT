@@ -1,0 +1,27 @@
+# Local Vector Database (ChromaDB files and caches)
+chroma_db/
+.chroma/
+
+# Cloned Repositories Cache
+test_repo1/
+
+# Environment Variables and Secrets (Crucial for hiding Groq API Keys)
+.env
+.env.local
+
+# Python Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+
+# Python caching and compiled bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Operating System specific files
+.DS_Store
+Thumbs.db
