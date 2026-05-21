@@ -1,31 +1,43 @@
 import os
 import shutil
 import stat
+import gc
+import time
+
 from git import Repo
+
 from langchain_community.document_loaders.generic import GenericLoader
 from langchain_community.document_loaders.parsers import LanguageParser
-from langchain_text_splitters import Language, RecursiveCharacterTextSplitter
+
+from langchain_text_splitters import (
+    Language,
+    RecursiveCharacterTextSplitter
+)
+
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
 
 def remove_readonly(func, path, excinfo):
-    """
-    Error handler for shutil.rmtree to handle Windows read-only files (like .git objects).
-    Flips the write permissions and retries deletion.
-    """
+
     os.chmod(path, stat.S_IWRITE)
     func(path)
 
-def repo_injection(repo_url, target_path="test_repo1"):
-    """Clones a remote GitHub repository to a local path using GitPython."""
-    # Wipe the directory if it already exists to avoid repo mixups
+def repo_injection(repo_url, target_path):
+
     if os.path.exists(target_path):
-        # Pass the onerror callback handler to deal with Windows WinError 5 permissions
-        shutil.rmtree(target_path, onerror=remove_readonly)
-        
+
+        shutil.rmtree(
+            target_path,
+            onerror=remove_readonly
+        )
+
     os.makedirs(target_path)
-    
-    Repo.clone_from(repo_url, to_path=target_path)
+
+    Repo.clone_from(
+        repo_url,
+        to_path=target_path
+    )
+
     return target_path
 
 LANGUAGE_EXTENSIONS = {
@@ -46,18 +58,17 @@ LANGUAGE_EXTENSIONS = {
     ".html": Language.HTML,
     ".sol": Language.SOL,
     ".lua": Language.LUA,
+    ".ipynb": Language.PYTHON,
 }
 
 def load_repo(repo_path):
-    """
-    Load all supported source code files from repository.
-    """
 
     all_documents = []
 
     for extension, language in LANGUAGE_EXTENSIONS.items():
 
         try:
+
             loader = GenericLoader.from_filesystem(
                 repo_path,
                 glob="**/*",
@@ -75,8 +86,6 @@ def load_repo(repo_path):
 
             all_documents.extend(documents)
 
-            print(f"Loaded {len(documents)} files for {extension}")
-
         except Exception as e:
             print(f"Skipping {extension}: {e}")
 
@@ -91,7 +100,11 @@ def text_splitter(documents):
         language_name = doc.metadata.get("language")
 
         try:
-            language_enum = getattr(Language, language_name)
+
+            language_enum = getattr(
+                Language,
+                language_name
+            )
 
             splitter = RecursiveCharacterTextSplitter.from_language(
                 language=language_enum,
@@ -101,40 +114,56 @@ def text_splitter(documents):
 
         except Exception:
 
-            # Fallback splitter
             splitter = RecursiveCharacterTextSplitter(
                 chunk_size=2000,
                 chunk_overlap=200
             )
 
         chunks = splitter.split_documents([doc])
+
         final_chunks.extend(chunks)
 
     return final_chunks
 
 def load_embeddings():
-    """Initializes the Hugging Face embedding model framework."""
-    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-    return embeddings
 
-def create_vector_db(repo_url, target_path="test_repo1", db_path="./chroma_db"):
-    """Executes the full pipeline to ingest a repo and create a vector store."""
-    # Step 1: Inject / Clone Repo
-    repo_path = repo_injection(repo_url, target_path=target_path)
+    return HuggingFaceEmbeddings(
+        model_name="sentence-transformers/all-MiniLM-L6-v2"
+    )
 
-    # Step 2: Extract & Structural Parsing
+def create_vector_db(
+    repo_url,
+    target_path,
+    db_path
+):
+
+    repo_path = repo_injection(
+        repo_url,
+        target_path=target_path
+    )
+
     docs = load_repo(repo_path)
 
-    # Step 3: Context-aware Chunking
     chunks = text_splitter(docs)
 
-    # Step 4: Get Embeddings Model
     embeddings = load_embeddings()
 
-    # Step 5: Save & Persist Chunks in Chroma DB
     db = Chroma.from_documents(
         documents=chunks,
         embedding=embeddings,
         persist_directory=db_path
     )
-    return db
+
+    db.persist()
+
+    # Cleanup refs
+    del db
+    del docs
+    del chunks
+    del embeddings
+
+    gc.collect()
+
+    time.sleep(1)
+
+    return True
